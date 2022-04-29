@@ -3,6 +3,8 @@ use druid::widget::{Flex, Button, Label, List};
 use druid::im::Vector;
 
 // for reference: https://github.com/futurepaul/druid-todo-tutorial
+//
+// other chat software in druid: https://github.com/loipesmas/accord
 
 #[derive(Clone, Data, Lens)]
 struct Message {
