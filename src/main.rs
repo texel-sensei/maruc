@@ -1,6 +1,6 @@
-use druid::{AppLauncher, WindowDesc, Lens, Widget, WidgetExt, PlatformError, Data};
-use druid::widget::{Flex, Button, Label, List};
 use druid::im::Vector;
+use druid::widget::{Button, Flex, Label, List};
+use druid::{AppLauncher, Data, Lens, PlatformError, Widget, WidgetExt, WindowDesc};
 
 // for reference: https://github.com/futurepaul/druid-todo-tutorial
 //
@@ -14,19 +14,22 @@ struct Message {
 
 impl Message {
     pub fn new<S: Into<String>>(text: S, user: i32) -> Self {
-        Message { text: text.into(), user }
+        Message {
+            text: text.into(),
+            user,
+        }
     }
 }
 
 #[derive(Clone, Data, Lens)]
 struct AppData {
-    pub history: Vector<Message>
+    pub history: Vector<Message>,
 }
 
 impl AppData {
     pub fn new() -> Self {
         AppData {
-            history: Vector::new()
+            history: Vector::new(),
         }
     }
 }
@@ -37,12 +40,15 @@ fn message() -> impl Widget<Message> {
 
 fn build_ui() -> impl Widget<AppData> {
     Flex::column()
-        .with_child(Button::new("Add").on_click(|_ctx, data: &mut AppData, _env| data.history.push_back(Message::new("test", 17))))
+        .with_child(
+            Button::new("Add").on_click(|_ctx, data: &mut AppData, _env| {
+                data.history.push_back(Message::new("test", 17))
+            }),
+        )
         .with_child(List::new(message).lens(AppData::history))
-
 }
 
-fn main() -> Result<(), PlatformError>{
+fn main() -> Result<(), PlatformError> {
     let state = AppData::new();
     AppLauncher::with_window(WindowDesc::new(build_ui)).launch(state)?;
     Ok(())
