@@ -2,6 +2,13 @@
 name = "maruc"
 version = "0.1.0"
 edition = "2021"
+authors = ["texel <texelsensei@posteo.net>"]
+description = "Chat client using the matrix protocol"
+readme = "README.md"
+license = "Unlicense"
+repository = "https://github.com/texel-sensei/maruc"
+keywords = ["matrix", "chat", "messaging"]
+categories = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
