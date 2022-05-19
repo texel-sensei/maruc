@@ -1,12 +1,6 @@
 use druid::im::Vector;
 use druid::widget::{Button, Flex, Label, List};
-use druid::{AppLauncher, Data, Lens, PlatformError, Widget, WidgetExt, WindowDesc};
-
-use matrix_sdk::reqwest::Url;
-use matrix_sdk::ruma::events::SyncMessageEvent;
-use matrix_sdk::ruma::events::room::message::MessageEventContent;
-use matrix_sdk::{self, Client, SyncSettings};
-use matrix_sdk::ruma::{user_id, events::room::message::MessageEvent};
+use druid::{AppLauncher, Data, Lens, Widget, WidgetExt, WindowDesc};
 
 // for reference: https://github.com/futurepaul/druid-todo-tutorial
 //
@@ -54,28 +48,13 @@ fn build_ui() -> impl Widget<AppData> {
         .with_child(List::new(message).lens(AppData::history))
 }
 
-async fn on_event(event: SyncMessageEvent<MessageEventContent>) {
-    dbg!(event);
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    /*
-    let blocking_task = tokio::task::spawn_blocking( || {
+    let blocking_task = tokio::task::spawn_blocking(|| {
         let state = AppData::new();
         AppLauncher::with_window(WindowDesc::new(build_ui)).launch(state)?;
         Ok(())
     });
-    */
 
-    //blocking_task.await.unwrap()
-
-    let client = Client::new(Url::parse("https://matrix.org")?)?;
-
-    client.register_event_handler(on_event).await;
-    client.login("user", "pw", None, Some("at.texel.maruc")).await?;
-
-    client.sync(SyncSettings::new()).await;
-
-    Ok(())
+    blocking_task.await.unwrap()
 }
