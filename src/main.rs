@@ -1,60 +1,110 @@
-use druid::im::Vector;
-use druid::widget::{Button, Flex, Label, List};
-use druid::{AppLauncher, Data, Lens, Widget, WidgetExt, WindowDesc};
+use gtk::prelude::{BoxExt, ButtonExt, EditableExt, EntryExt, GtkWindowExt, OrientableExt};
+use relm4::{gtk, send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
+use secrecy::SecretString;
 
-// for reference: https://github.com/futurepaul/druid-todo-tutorial
-//
-// other chat software in druid: https://github.com/loipesmas/accord
-
-#[derive(Clone, Data, Lens)]
-struct Message {
-    pub text: String,
-    pub user: i32,
+struct AppModel {
+    counter: u8,
 }
 
-impl Message {
-    pub fn new<S: Into<String>>(text: S, user: i32) -> Self {
-        Message {
-            text: text.into(),
-            user,
+impl AppModel {
+    fn new() -> Self {
+        Self { counter: 0 }
+    }
+}
+
+enum AppMsg {
+    Increment,
+    Decrement,
+    Login {
+        username: String,
+        password: SecretString,
+    },
+}
+
+impl Model for AppModel {
+    type Msg = AppMsg;
+    type Widgets = AppWidgets;
+    type Components = ();
+}
+
+impl AppUpdate for AppModel {
+    fn update(&mut self, msg: AppMsg, _components: &(), _sender: Sender<AppMsg>) -> bool {
+        match msg {
+            AppMsg::Increment => {
+                self.counter = self.counter.wrapping_add(1);
+            }
+            AppMsg::Decrement => {
+                self.counter = self.counter.wrapping_sub(1);
+            }
+            AppMsg::Login { username, password } => {
+                use secrecy::ExposeSecret;
+                println!(
+                    "Username: {} Password: {}",
+                    username,
+                    password.expose_secret()
+                );
+            }
+        }
+        true
+    }
+}
+
+#[relm4::widget]
+impl Widgets<AppModel, ()> for AppWidgets {
+    view! {
+        gtk::ApplicationWindow {
+            set_title: Some("Simple app"),
+            set_default_width: 300,
+            set_default_height: 100,
+            set_child = Some(&gtk::Box) {
+                set_orientation: gtk::Orientation::Vertical,
+                set_margin_all: 5,
+                set_spacing: 5,
+
+                append: username = &gtk::Entry {
+                    set_placeholder_text: Some("username")
+                },
+
+                append: password = &gtk::PasswordEntry{
+                    set_placeholder_text: Some("password")
+                },
+
+                append = &gtk::Button {
+                    set_label: "Login",
+                    connect_clicked(sender, username, password) => move |_| {
+                        send!(sender, AppMsg::Login{
+                            username: username.text().to_string(),
+                            password: SecretString::new(password.text().to_string())
+                        });
+                        username.set_text("");
+                        password.set_text("");
+                    },
+                },
+
+
+                append = &gtk::Button {
+                    set_label: "Increment",
+                    connect_clicked(sender) => move |_| {
+                        send!(sender, AppMsg::Increment);
+                    },
+                },
+                append = &gtk::Button::with_label("Decrement") {
+                    connect_clicked(sender) => move |_| {
+                        send!(sender, AppMsg::Decrement);
+                    },
+                },
+                append = &gtk::Label {
+                    set_margin_all: 5,
+                    set_label: watch! { &format!("Counter: {}", model.counter) },
+                }
+            },
         }
     }
 }
 
-#[derive(Clone, Data, Lens)]
-struct AppData {
-    pub history: Vector<Message>,
-}
-
-impl AppData {
-    pub fn new() -> Self {
-        AppData {
-            history: Vector::new(),
-        }
-    }
-}
-
-fn message() -> impl Widget<Message> {
-    Label::new("test")
-}
-
-fn build_ui() -> impl Widget<AppData> {
-    Flex::column()
-        .with_child(
-            Button::new("Add").on_click(|_ctx, data: &mut AppData, _env| {
-                data.history.push_back(Message::new("test", 17))
-            }),
-        )
-        .with_child(List::new(message).lens(AppData::history))
-}
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let blocking_task = tokio::task::spawn_blocking(|| {
-        let state = AppData::new();
-        AppLauncher::with_window(WindowDesc::new(build_ui)).launch(state)?;
-        Ok(())
-    });
-
-    blocking_task.await.unwrap()
+fn main() {
+    gtk::init().expect("Failed to initialize GTK!");
+    let model = AppModel::new();
+    let app = RelmApp::new(model);
+    app.run();
 }
