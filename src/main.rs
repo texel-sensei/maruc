@@ -2,19 +2,15 @@ use gtk::prelude::{BoxExt, ButtonExt, EditableExt, EntryExt, GtkWindowExt, Orien
 use relm4::{gtk, send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 use secrecy::SecretString;
 
-struct AppModel {
-    counter: u8,
-}
+struct AppModel {}
 
 impl AppModel {
     fn new() -> Self {
-        Self { counter: 0 }
+        Self {}
     }
 }
 
 enum AppMsg {
-    Increment,
-    Decrement,
     Login {
         username: String,
         password: SecretString,
@@ -30,12 +26,6 @@ impl Model for AppModel {
 impl AppUpdate for AppModel {
     fn update(&mut self, msg: AppMsg, _components: &(), _sender: Sender<AppMsg>) -> bool {
         match msg {
-            AppMsg::Increment => {
-                self.counter = self.counter.wrapping_add(1);
-            }
-            AppMsg::Decrement => {
-                self.counter = self.counter.wrapping_sub(1);
-            }
             AppMsg::Login { username, password } => {
                 use secrecy::ExposeSecret;
                 println!(
@@ -53,7 +43,7 @@ impl AppUpdate for AppModel {
 impl Widgets<AppModel, ()> for AppWidgets {
     view! {
         gtk::ApplicationWindow {
-            set_title: Some("Simple app"),
+            set_title: Some("maruc"),
             set_default_width: 300,
             set_default_height: 100,
             set_child = Some(&gtk::Box) {
@@ -80,23 +70,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         password.set_text("");
                     },
                 },
-
-
-                append = &gtk::Button {
-                    set_label: "Increment",
-                    connect_clicked(sender) => move |_| {
-                        send!(sender, AppMsg::Increment);
-                    },
-                },
-                append = &gtk::Button::with_label("Decrement") {
-                    connect_clicked(sender) => move |_| {
-                        send!(sender, AppMsg::Decrement);
-                    },
-                },
-                append = &gtk::Label {
-                    set_margin_all: 5,
-                    set_label: watch! { &format!("Counter: {}", model.counter) },
-                }
             },
         }
     }
