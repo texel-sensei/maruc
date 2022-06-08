@@ -14,6 +14,7 @@ enum AppMsg {
     Login {
         username: String,
         password: SecretString,
+        homeserver: String,
     },
 }
 
@@ -26,12 +27,17 @@ impl Model for AppModel {
 impl AppUpdate for AppModel {
     fn update(&mut self, msg: AppMsg, _components: &(), _sender: Sender<AppMsg>) -> bool {
         match msg {
-            AppMsg::Login { username, password } => {
+            AppMsg::Login {
+                username,
+                password,
+                homeserver,
+            } => {
                 use secrecy::ExposeSecret;
                 println!(
-                    "Username: {} Password: {}",
+                    "Username: {} Password: {} Homeserver: {}",
                     username,
-                    password.expose_secret()
+                    password.expose_secret(),
+                    homeserver
                 );
             }
         }
@@ -51,6 +57,10 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 set_margin_all: 5,
                 set_spacing: 5,
 
+                append: homeserver = &gtk::Entry {
+                    set_placeholder_text: Some("home server")
+                },
+
                 append: username = &gtk::Entry {
                     set_placeholder_text: Some("username")
                 },
@@ -61,13 +71,15 @@ impl Widgets<AppModel, ()> for AppWidgets {
 
                 append = &gtk::Button {
                     set_label: "Login",
-                    connect_clicked(sender, username, password) => move |_| {
+                    connect_clicked(sender, username, password, homeserver) => move |_| {
                         send!(sender, AppMsg::Login{
                             username: username.text().to_string(),
-                            password: SecretString::new(password.text().to_string())
+                            password: SecretString::new(password.text().to_string()),
+                            homeserver: homeserver.text().to_string()
                         });
                         username.set_text("");
                         password.set_text("");
+                        homeserver.set_text("");
                     },
                 },
             },
