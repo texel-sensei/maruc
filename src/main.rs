@@ -1,5 +1,7 @@
 use gtk::prelude::{BoxExt, ButtonExt, EditableExt, EntryExt, GtkWindowExt, OrientableExt};
 use relm4::{gtk, send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
+
+mod secrecy;
 use secrecy::SecretString;
 
 struct AppModel {}
