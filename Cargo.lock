@@ -1292,6 +1292,7 @@ dependencies = [
  "relm4",
  "relm4-components",
  "tokio",
+ "tracker",
  "zeroize",
 ]
 
