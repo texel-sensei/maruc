@@ -1,22 +1,34 @@
+use futures::StreamExt;
 use gtk::prelude::{BoxExt, ButtonExt, EditableExt, EntryExt, GtkWindowExt, OrientableExt};
+use matrix_sdk::{config::SyncSettings, reqwest::Url, Client};
 use relm4::{gtk, send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 
 mod secrecy;
 use secrecy::SecretString;
 
-struct AppModel {}
+#[tracker::track]
+struct AppModel {
+    login_user_message: String,
+}
 
 impl AppModel {
     fn new() -> Self {
-        Self {}
+        Self {
+            login_user_message: String::new(),
+            tracker: 0,
+        }
     }
 }
 
+#[derive(Debug)]
 enum AppMsg {
     Login {
         username: String,
         password: SecretString,
         homeserver: String,
+    },
+    LoginResult {
+        result: Result<(), matrix_sdk::Error>,
     },
 }
 
@@ -27,7 +39,10 @@ impl Model for AppModel {
 }
 
 impl AppUpdate for AppModel {
-    fn update(&mut self, msg: AppMsg, _components: &(), _sender: Sender<AppMsg>) -> bool {
+    fn update(&mut self, msg: AppMsg, _components: &(), sender: Sender<AppMsg>) -> bool {
+        // reset tracked changes
+        self.reset();
+
         match msg {
             AppMsg::Login {
                 username,
@@ -35,13 +50,28 @@ impl AppUpdate for AppModel {
                 homeserver,
             } => {
                 use secrecy::ExposeSecret;
-                println!(
-                    "Username: {} Password: {} Homeserver: {}",
-                    username,
-                    password.expose_secret(),
-                    homeserver
-                );
+                println!("Trying to log in @{}:{}", username, homeserver);
+                tokio::spawn(async move {
+                    let result = login(homeserver, &username, password.expose_secret()).await;
+                    send!(sender, AppMsg::LoginResult { result });
+                });
             }
+            AppMsg::LoginResult { result } => match result {
+                Ok(_) => self.set_login_user_message("Login successful!".to_string()),
+                Err(e) => {
+                    use matrix_sdk::{
+                        ruma::api::error::FromHttpResponseError, Error::Http, HttpError,
+                        RumaApiError,
+                    };
+                    let message = match e {
+                        Http(HttpError::Api(FromHttpResponseError::<RumaApiError>::Server(
+                            code,
+                        ))) => format!("Computer said no: {}", code),
+                        _ => e.to_string(),
+                    };
+                    self.set_login_user_message(message);
+                }
+            },
         }
         true
     }
@@ -84,14 +114,51 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         homeserver.set_text("");
                     },
                 },
+
+                append = &gtk::Label {
+                    set_text: track!(model.changed(AppModel::login_user_message()), &model.login_user_message)
+                },
             },
         }
     }
 }
 
-fn main() {
-    gtk::init().expect("Failed to initialize GTK!");
-    let model = AppModel::new();
-    let app = RelmApp::new(model);
-    app.run();
+async fn login(
+    homeserver_url: String,
+    username: &str,
+    password: &str,
+) -> Result<(), matrix_sdk::Error> {
+    let homeserver_url = Url::parse(&homeserver_url).expect("Couldn't parse the homeserver URL");
+    let client = Client::new(homeserver_url).await.unwrap();
+
+    client
+        .login(username, password, None, Some("maruc"))
+        .await?;
+
+    tokio::spawn(async move {
+        let mut sync_stream = Box::pin(client.sync_stream(SyncSettings::default()).await);
+        while let Some(Ok(response)) = sync_stream.next().await {
+            for room in response.rooms.join.values() {
+                for e in &room.timeline.events {
+                    if let Ok(event) = e.event.deserialize() {
+                        println!("Received event {:?}", event);
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    tokio::task::spawn_blocking(|| {
+        gtk::init().expect("Failed to initialize GTK!");
+        let model = AppModel::new();
+        let app = RelmApp::new(model);
+        app.run();
+    })
+    .await
+    .unwrap();
 }
