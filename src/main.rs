@@ -1,10 +1,83 @@
-use futures::StreamExt;
+use futures::future::join_all;
+use std::collections::HashMap;
+
 use gtk::prelude::{BoxExt, ButtonExt, EditableExt, EntryExt, GtkWindowExt, OrientableExt};
-use matrix_sdk::{config::SyncSettings, reqwest::Url, Client};
+use matrix_sdk::{
+    config::SyncSettings,
+    reqwest::Url,
+    ruma::{events::space::child::SyncSpaceChildEvent, serde::Raw, OwnedRoomId, RoomId},
+    Client,
+};
 use relm4::{gtk, send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 
 mod secrecy;
 use secrecy::SecretString;
+mod spacegraph;
+use spacegraph::*;
+
+/// Relevant data for a user account.
+struct Account {
+    #[allow(dead_code)]
+    pub client: matrix_sdk::Client,
+    #[allow(dead_code)]
+    pub rooms: HashMap<OwnedRoomId, Room>,
+    #[allow(dead_code)]
+    pub spaces: Vec<SpaceReference>,
+}
+
+#[derive(Debug)]
+enum RoomType {
+    Space,
+    DirectMessage,
+    Room,
+}
+
+/// Data related to a single matrix room.
+struct Room {
+    pub sdk_room: matrix_sdk::room::Room,
+    pub name: matrix_sdk::DisplayName,
+    pub rtype: RoomType,
+}
+
+impl Room {
+    async fn new(sdk_room: matrix_sdk::room::Room) -> Self {
+        let name = sdk_room
+            .display_name()
+            .await
+            .unwrap_or(matrix_sdk::DisplayName::Empty);
+        let rtype = if sdk_room.is_space() {
+            RoomType::Space
+        } else if sdk_room.is_direct() {
+            RoomType::DirectMessage
+        } else {
+            RoomType::Room
+        };
+
+        Self {
+            sdk_room,
+            name,
+            rtype,
+        }
+    }
+}
+
+impl std::fmt::Debug for Room {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{} \"{}\" {:?}]",
+            self.sdk_room.room_id(),
+            self.name,
+            self.rtype
+        )
+    }
+}
+
+impl std::fmt::Display for Room {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
 
 #[tracker::track]
 struct AppModel {
@@ -20,7 +93,6 @@ impl AppModel {
     }
 }
 
-#[derive(Debug)]
 enum AppMsg {
     Login {
         username: String,
@@ -28,7 +100,7 @@ enum AppMsg {
         homeserver: String,
     },
     LoginResult {
-        result: Result<(), matrix_sdk::Error>,
+        result: Result<Account, matrix_sdk::Error>,
     },
 }
 
@@ -52,7 +124,7 @@ impl AppUpdate for AppModel {
                 use secrecy::ExposeSecret;
                 println!("Trying to log in @{}:{}", username, homeserver);
                 tokio::spawn(async move {
-                    let result = login(homeserver, &username, password.expose_secret()).await;
+                    let result = login(&homeserver, &username, password.expose_secret()).await;
                     send!(sender, AppMsg::LoginResult { result });
                 });
             }
@@ -124,31 +196,99 @@ impl Widgets<AppModel, ()> for AppWidgets {
 }
 
 async fn login(
-    homeserver_url: String,
+    homeserver_url: &str,
     username: &str,
     password: &str,
-) -> Result<(), matrix_sdk::Error> {
-    let homeserver_url = Url::parse(&homeserver_url).expect("Couldn't parse the homeserver URL");
+) -> Result<Account, matrix_sdk::Error> {
+    let homeserver_url = Url::parse(homeserver_url).expect("Couldn't parse the homeserver URL");
     let client = Client::new(homeserver_url).await.unwrap();
 
     client
         .login(username, password, None, Some("maruc"))
         .await?;
 
-    tokio::spawn(async move {
-        let mut sync_stream = Box::pin(client.sync_stream(SyncSettings::default()).await);
-        while let Some(Ok(response)) = sync_stream.next().await {
-            for room in response.rooms.join.values() {
-                for e in &room.timeline.events {
-                    if let Ok(event) = e.event.deserialize() {
-                        println!("Received event {:?}", event);
-                    }
+    // TODO(texel, 2022-07-17): replace with background worker (WK-31)
+    client.sync_once(SyncSettings::new()).await?;
+
+    let rooms = client
+        .rooms()
+        .into_iter()
+        .map(|r| tokio::spawn(Room::new(r)));
+
+    let rooms = join_all(rooms)
+        .await
+        .into_iter()
+        .map(|r| r.expect("Task has paniced!"));
+
+    let rooms: HashMap<OwnedRoomId, Room> = rooms
+        .map(|r| (r.sdk_room.room_id().to_owned(), r))
+        .collect();
+    //r.room_id().to_owned()
+
+    let spaces: Vec<_> = client
+        .joined_rooms()
+        .iter()
+        .filter(|r| r.is_space())
+        .map(|r| Space::new(r.room_id().to_owned()))
+        .collect();
+
+    let mut possible_roots: HashMap<&RoomId, SpaceReference> =
+        spaces.iter().map(|s| (s.room_id(), s.clone())).collect();
+
+    for current in &spaces {
+        let id = current.room_id();
+        let room = client.get_room(id);
+
+        let room = match room {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let children: Vec<Raw<SyncSpaceChildEvent>> = room.get_state_events_static().await?;
+
+        for c in children {
+            let child_id: Option<&RoomId> = c
+                .get_field("state_key")
+                .ok()
+                .flatten()
+                .and_then(|id: &str| id.try_into().ok());
+
+            let child_id = match child_id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            if rooms[child_id].sdk_room.is_space() {
+                let space_ref = spaces
+                    .iter()
+                    .find(|s| s.room_id() == child_id)
+                    .unwrap()
+                    .clone();
+
+                let result = current.add_child(space_ref);
+                if result.is_err() {
+                    eprintln!(
+                        "Would build cycle between {child_id} and {}!",
+                        current.room_id()
+                    );
+                    continue;
                 }
+                possible_roots.remove(child_id);
+            } else {
+                current.insert_room(child_id);
             }
         }
-    });
+    }
 
-    Ok(())
+    println!("{:?}", rooms);
+    println!("{:?}", spaces);
+    println!("{:?}", possible_roots);
+
+    Ok(Account {
+        client,
+        rooms,
+        spaces: possible_roots.into_values().collect(),
+    })
 }
 
 #[tokio::main]
