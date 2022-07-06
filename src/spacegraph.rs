@@ -1,0 +1,92 @@
+use std::{
+    ops::ControlFlow,
+    sync::{Arc, Mutex},
+};
+
+use anyhow::bail;
+use matrix_sdk::ruma::OwnedRoomId;
+
+pub type SpaceReference = Arc<Space>;
+
+/// Graph of spaces, referencing the [[Account.rooms]] collection.
+///
+/// Invariant: The graph of spaces forms a DAG.
+pub struct Space {
+    room_id: OwnedRoomId,
+    contained_rooms: Mutex<Vec<OwnedRoomId>>,
+    children: Mutex<Vec<SpaceReference>>,
+}
+
+impl Space {
+    pub fn new(room_id: OwnedRoomId) -> SpaceReference {
+        Arc::new(Self {
+            room_id,
+            contained_rooms: Mutex::new(Vec::new()),
+            children: Mutex::new(Vec::new()),
+        })
+    }
+
+
+    /// Iterate over all direct children of this space.
+    pub fn children(&self) -> Vec<SpaceReference> {
+        self.children.lock().unwrap().clone()
+    }
+
+    /// Traverse the subgraph reachable from this space.
+    ///
+    /// Spaces that are reachable via multiple parent spaces are visited multiple times.
+    pub fn traverse<Action: FnMut(&Space) -> ControlFlow<()>>(&self, mut action: Action) {
+        let mut stack = self.children();
+
+        match action(&self) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(_) => return,
+        }
+
+        while !stack.is_empty() {
+            // unwrap is safe, as we exit the loop if the stack is empty
+            let current = stack.pop().unwrap();
+
+            for c in current.children() {
+                stack.push(c);
+            }
+            match action(&current) {
+                ControlFlow::Continue(_) => {}
+                ControlFlow::Break(_) => return,
+            }
+        }
+    }
+
+    pub fn add_child(&self, child: SpaceReference) -> anyhow::Result<()> {
+        let mut can_reach_parent = false;
+        child.traverse(|current| {
+            if std::ptr::eq(current, self) {
+                can_reach_parent = true;
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        if can_reach_parent {
+            bail!("Adding child would result in a cycle!");
+        } else {
+            self.children.lock().unwrap().push(child);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_child() {
+        let parent = Space::new("!parent:example.org".parse().unwrap());
+        let child = Space::new("!child:example.org".parse().unwrap());
+        assert!(parent.children().is_empty());
+        assert!(parent.add_child(child).is_ok());
+        assert!(child.children().is_empty());
+        assert!(parent.children().iter().eq_by(vec![child], Arc::ptr_eq));
+    }
+}

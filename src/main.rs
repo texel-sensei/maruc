@@ -13,8 +13,8 @@ use relm4::{
 
 mod secrecy;
 use secrecy::SecretString;
-
-type SpaceReference = Arc<Mutex<Space>>;
+mod spacegraph;
+use spacegraph::*;
 
 /// Relevant data for a user account.
 struct Account {
@@ -26,43 +26,6 @@ struct Account {
 /// Data related to a single matrix room.
 struct Room {
     pub sdk_room: matrix_sdk::room::Room,
-}
-
-/// Graph of spaces, referencing the [[Account.rooms]] collection.
-///
-/// Invariant: The graph of spaces forms a DAG.
-struct Space {
-    room_id: Box<RoomId>,
-    contained_rooms: Vec<Box<RoomId>>,
-    children: Vec<SpaceReference>,
-}
-
-impl Space {
-    /// Iterate over all direct children of this space.
-    pub fn children(&self) -> impl Iterator<Item = SpaceReference> + '_ {
-        self.children.iter().cloned()
-    }
-
-    /// Traverse the subgraph reachable from this space.
-    ///
-    /// Spaces that are reachable via multiple parent spaces are visited multiple times.
-    pub fn traverse<Action: FnMut(&Space)>(self, mut action: Action) {
-        let mut stack: Vec<SpaceReference> = self.children().collect();
-
-        action(&self);
-
-        while !stack.is_empty() {
-            // unwrap is safe, as we exit the loop if the stack is empty
-            let current = stack.pop().unwrap();
-
-            let current = current.lock().unwrap();
-
-            for c in current.children() {
-                stack.push(c);
-            }
-            action(&current);
-        }
-    }
 }
 
 #[tracker::track]
