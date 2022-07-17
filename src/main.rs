@@ -1,11 +1,8 @@
 use std::collections::HashMap;
 
-use futures::StreamExt;
 use gtk::prelude::{BoxExt, ButtonExt, EditableExt, EntryExt, GtkWindowExt, OrientableExt};
-use matrix_sdk::{config::SyncSettings, reqwest::Url, ruma::RoomId, Client};
-use relm4::{
-    gtk, send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets,
-};
+use matrix_sdk::{config::SyncSettings, reqwest::Url, ruma::OwnedRoomId, Client};
+use relm4::{gtk, send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 
 mod secrecy;
 use secrecy::SecretString;
@@ -15,13 +12,19 @@ use spacegraph::*;
 /// Relevant data for a user account.
 struct Account {
     pub client: matrix_sdk::Client,
-    pub rooms: HashMap<Box<RoomId>, Room>,
+    pub rooms: HashMap<OwnedRoomId, Room>,
     pub spaces: Vec<SpaceReference>,
 }
 
 /// Data related to a single matrix room.
 struct Room {
     pub sdk_room: matrix_sdk::room::Room,
+}
+
+impl Room {
+    fn new(sdk_room: matrix_sdk::room::Room) -> Self {
+        Self { sdk_room }
+    }
 }
 
 #[tracker::track]
@@ -38,7 +41,6 @@ impl AppModel {
     }
 }
 
-#[derive(Debug)]
 enum AppMsg {
     Login {
         username: String,
@@ -46,7 +48,7 @@ enum AppMsg {
         homeserver: String,
     },
     LoginResult {
-        result: Result<(), matrix_sdk::Error>,
+        result: Result<Account, matrix_sdk::Error>,
     },
 }
 
@@ -145,7 +147,7 @@ async fn login(
     homeserver_url: String,
     username: &str,
     password: &str,
-) -> Result<(), matrix_sdk::Error> {
+) -> Result<Account, matrix_sdk::Error> {
     let homeserver_url = Url::parse(&homeserver_url).expect("Couldn't parse the homeserver URL");
     let client = Client::new(homeserver_url).await.unwrap();
 
@@ -153,20 +155,28 @@ async fn login(
         .login(username, password, None, Some("maruc"))
         .await?;
 
-    tokio::spawn(async move {
-        let mut sync_stream = Box::pin(client.sync_stream(SyncSettings::default()).await);
-        while let Some(Ok(response)) = sync_stream.next().await {
-            for room in response.rooms.join.values() {
-                for e in &room.timeline.events {
-                    if let Ok(event) = e.event.deserialize() {
-                        println!("Received event {:?}", event);
-                    }
-                }
-            }
-        }
-    });
+    // TODO(texel, 2022-07-17): replace with background worker (WK-31)
+    client.sync_once(SyncSettings::new()).await?;
 
-    Ok(())
+    let rooms = client
+        .rooms()
+        .iter()
+        .map(|r| (r.room_id().to_owned(), Room::new(r.clone())))
+        .collect();
+
+    // TODO(texel, 2022-07-17): This ignores the space hierarchy and assumes all spaces to be roots
+    let spaces = client
+        .joined_rooms()
+        .iter()
+        .filter(|r| r.is_space())
+        .map(|r| Space::new(r.room_id().to_owned()))
+        .collect();
+
+    Ok(Account {
+        client,
+        rooms,
+        spaces,
+    })
 }
 
 #[tokio::main]

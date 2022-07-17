@@ -37,7 +37,7 @@ impl Space {
     pub fn traverse<Action: FnMut(&Space) -> ControlFlow<()>>(&self, mut action: Action) {
         let mut stack = self.children();
 
-        match action(&self) {
+        match action(self) {
             ControlFlow::Continue(_) => {}
             ControlFlow::Break(_) => return,
         }
@@ -79,7 +79,7 @@ impl Space {
 mod tests {
     use super::*;
 
-    fn assert_vec_equal(actual: &Vec<SpaceReference>, expected: &Vec<SpaceReference>) {
+    fn assert_vec_equal(actual: &[SpaceReference], expected: &[SpaceReference]) {
         for (a, e) in actual.iter().zip(expected.iter()) {
             assert!(Arc::ptr_eq(a, e));
         }
@@ -94,7 +94,7 @@ mod tests {
         // adding a child works
         assert!(parent.add_child(child.clone()).is_ok());
         assert!(child.children().is_empty());
-        assert_vec_equal(&parent.children(), &vec![child.clone()]);
+        assert_vec_equal(&parent.children(), &[child.clone()]);
 
         // creating a cycle doesn't
         assert!(child.add_child(parent.clone()).is_err());
@@ -105,7 +105,7 @@ mod tests {
         assert!(child.add_child(grandchild.clone()).is_ok());
 
         // creating a cycle doesn't
-        assert!(grandchild.add_child(parent.clone()).is_err());
+        assert!(grandchild.add_child(parent).is_err());
     }
 
     #[test]
