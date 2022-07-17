@@ -26,7 +26,6 @@ impl Space {
         })
     }
 
-
     /// Iterate over all direct children of this space.
     pub fn children(&self) -> Vec<SpaceReference> {
         self.children.lock().unwrap().clone()
@@ -80,13 +79,39 @@ impl Space {
 mod tests {
     use super::*;
 
+    fn assert_vec_equal(actual: &Vec<SpaceReference>, expected: &Vec<SpaceReference>) {
+        for (a, e) in actual.iter().zip(expected.iter()) {
+            assert!(Arc::ptr_eq(a, e));
+        }
+    }
+
     #[test]
     fn test_add_child() {
         let parent = Space::new("!parent:example.org".parse().unwrap());
         let child = Space::new("!child:example.org".parse().unwrap());
         assert!(parent.children().is_empty());
-        assert!(parent.add_child(child).is_ok());
+
+        // adding a child works
+        assert!(parent.add_child(child.clone()).is_ok());
         assert!(child.children().is_empty());
-        assert!(parent.children().iter().eq_by(vec![child], Arc::ptr_eq));
+        assert_vec_equal(&parent.children(), &vec![child.clone()]);
+
+        // creating a cycle doesn't
+        assert!(child.add_child(parent.clone()).is_err());
+
+        let grandchild = Space::new("!grandchild:example.org".parse().unwrap());
+
+        // adding a grandchild works
+        assert!(child.add_child(grandchild.clone()).is_ok());
+
+        // creating a cycle doesn't
+        assert!(grandchild.add_child(parent.clone()).is_err());
+    }
+
+    #[test]
+    fn test_self_add_child_fails() {
+        let node = Space::new("!parent:example.org".parse().unwrap());
+
+        assert!(node.add_child(node.clone()).is_err());
     }
 }

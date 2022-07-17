@@ -1,13 +1,9 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::collections::HashMap;
 
 use futures::StreamExt;
 use gtk::prelude::{BoxExt, ButtonExt, EditableExt, EntryExt, GtkWindowExt, OrientableExt};
 use matrix_sdk::{config::SyncSettings, reqwest::Url, ruma::RoomId, Client};
 use relm4::{
-    factory::{FactoryPrototype, FactoryVecDeque},
     gtk, send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets,
 };
 
