@@ -1291,6 +1291,7 @@ dependencies = [
  "matrix-sdk",
  "relm4",
  "relm4-components",
+ "ruma-common",
  "tokio",
  "tracker",
  "zeroize",
