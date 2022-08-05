@@ -20,6 +20,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --user pre-commit
+        sudo apt update
         sudo apt install -y libgtk-4-dev
 
     - name: Run pre-commit
